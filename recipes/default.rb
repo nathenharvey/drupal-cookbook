@@ -18,8 +18,15 @@
 # limitations under the License.
 #
 
-include_recipe %w{apache2 apache2::mod_php5 apache2::mod_rewrite apache2::mod_expires}
-include_recipe %w{php php::module_mysql php::module_gd}
+if node['drupal']['webserver'] == "apache2"
+  include_recipe %w{apache2 apache2::mod_php5 apache2::mod_rewrite apache2::mod_expires}
+elsif node['drupal']['webserver'] == "nginx"
+  # include_recipe %w{nginx}
+else
+  log("Only webservers currently supported: apache2 and nginx. You have: #{node['drupal']['webserver']}") { level :warn }
+end
+
+include_recipe %w{php php::module_mysql php::module_gd} unless node['drupal']['skip_php']
 include_recipe "postfix"
 include_recipe "drupal::drush"
 include_recipe "mysql::server"
@@ -83,16 +90,33 @@ if node['drupal']['modules']
   end
 end
 
-web_app "drupal" do
-  template "drupal.conf.erb"
-  docroot node['drupal']['dir']
-  server_name server_fqdn
-  server_aliases node['fqdn']
-end
-
 include_recipe "drupal::cron"
 
-execute "disable-default-site" do
-   command "sudo a2dissite default"
-   notifies :reload, resources(:service => "apache2"), :delayed
+if node['drupal']['webserver'] == "apache2"
+  web_app node['drupal']['site']['name'] do
+    template "drupal.conf.erb"
+    docroot node['drupal']['dir']
+    server_name server_fqdn
+    server_aliases node.fqdn
+  end
+
+  execute "disable-default-site" do
+    command "sudo a2dissite default"
+    notifies :reload, resources(:service => "apache2"), :delayed
+  end
+end
+
+if node['drupal']['webserver'] == "nginx"
+  template "#{node['nginx']['dir']}/sites-enabled/#{node['drupal']['site']['name']}" do
+    source "sites.conf.erb"
+    owner "root"
+    group "root"
+    mode "0600"
+    variables(
+      :docroot => node['drupal']['dir'],
+      :server_name => server_fqdn
+    )
+  end
+  
+  nginx_site node['drupal']['site']['name']
 end
